@@ -35,7 +35,7 @@ All published series are under the project’s indicators/ folder. The indicator
 - **Above SMA40** is 100 times the combined count of stocks closing above their SMA40 divided by the combined count of eligible stocks. Eligibility requires 40 consecutive valid closing prices.
 - **Ratio10D** divides the sum of Up4 by the sum of Down4 over the last 10 sessions, including the current session. A zero denominator produces a null value. Up4 counts returns of at least +4%, and Down4 counts returns of −4% or lower. Both require current volume of at least 100,000 shares and higher than the previous comparable volume.
 
-Each CSV preserves its Parquet columns and uses ISO dates and empty fields for nulls. Each PNG shows the full historical period.
+Published numeric values have at most two decimal places. Indicator calculations retain full precision before export. Each CSV preserves its Parquet columns and uses ISO dates and empty fields for nulls. Each PNG shows the full historical period.
 
 ## References and limitations
 

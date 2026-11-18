@@ -65,7 +65,7 @@ def test_derivatives_round_trip(tmp_path):
     frame = pd.DataFrame({"date":pd.to_datetime(["2026-01-02","2026-01-05"]),
                           "ratio10d":pd.Series([pd.NA, 1.2345678901234567], dtype="Float64")})
     cli.export_series(tmp_path, "ratio10d", frame)
-    cli.equal_csv(tmp_path/"indicators/ratio10d/ratio10d.csv", frame)
+    cli.equal_csv(tmp_path/"indicators/ratio10d/ratio10d.csv", frame.round(2))
     assert (tmp_path/"indicators/ratio10d/ratio10d.png").is_file()
 
 

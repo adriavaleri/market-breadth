@@ -55,23 +55,27 @@ def available_end():
     return (now.date() - dt.timedelta(days=1 if now.hour >= 11 else 2)).isoformat()
 
 
+DECIMAL_PLACES = 2
+
+
 def export_series(dest, name, frame):
     folder = dest / OUTPUT_DIR / name
     folder.mkdir(exist_ok=True, parents=True)
     file = folder / f"{name}.parquet"
-    frame.to_parquet(file, index=False, compression="zstd")
+    frame.round(DECIMAL_PLACES).to_parquet(file, index=False, compression="zstd")
     write_derivatives(file)
 
 
 def write_derivatives(file):
     frame = pd.read_parquet(file)
-    frame.to_csv(file.with_suffix(".csv"), index=False, date_format="%Y-%m-%d")
+    frame.to_csv(file.with_suffix(".csv"), index=False, date_format="%Y-%m-%d", float_format="%.2f")
     label = frame.columns[1]
     figure, ax = plt.subplots(figsize=(12, 4), layout="constrained")
     ax.plot(frame.date, frame[label].to_numpy(dtype=float, na_value=np.nan),
             color="#126782", linewidth=0.8)
     ax.set_title(file.stem.replace("_", " ").upper(), loc="left")
     ax.set_ylabel("%" if label == "above_sma40_pct" else label)
+    ax.yaxis.set_major_formatter(lambda value, _: f"{value:.2f}".rstrip("0").rstrip("."))
     ax.grid(alpha=0.22)
     figure.savefig(file.with_suffix(".png"), dpi=150, metadata={"Software": "market_breadth", "SourceSHA256": hashlib.sha256(file.read_bytes()).hexdigest()})
     plt.close(figure)
@@ -98,7 +102,7 @@ def export_combined(root):
     folder.mkdir(exist_ok=True)
     file = folder / "combined.parquet"
     frame.to_parquet(file, index=False, compression="zstd")
-    pd.read_parquet(file).to_csv(file.with_suffix(".csv"), index=False, date_format="%Y-%m-%d")
+    pd.read_parquet(file).to_csv(file.with_suffix(".csv"), index=False, date_format="%Y-%m-%d", float_format="%.2f")
 
 
 def equal_csv(file, frame):
@@ -125,6 +129,7 @@ def validate(root=ROOT):
         expected = massive.session_dates(FIRST_OUTPUT, str(frame.date.iloc[-1].date()))
         if frame.date.dt.strftime("%Y-%m-%d").tolist() != expected:
             raise ValueError(f"{name}: invalid session calendar")
+        pd.testing.assert_frame_equal(frame, frame.round(DECIMAL_PLACES), check_exact=True)
         equal_csv(stem.with_suffix(".csv"), frame)
         with Image.open(stem.with_suffix(".png")) as image:
             if image.info.get("SourceSHA256") != hashlib.sha256(parquet.read_bytes()).hexdigest():
@@ -144,7 +149,7 @@ def validate(root=ROOT):
             and (ad.comparable_count + ad.not_comparable_count).eq(ad.universe_count).all()):
         raise ValueError("NYSE breadth count or AD Line mismatch")
     def check_values(actual, expected):
-        if not np.array_equal(np.asarray(actual, dtype=float), np.asarray(expected, dtype=float), equal_nan=True):
+        if not np.array_equal(np.asarray(actual, dtype=float), np.round(np.asarray(expected, dtype=float), DECIMAL_PLACES), equal_nan=True):
             raise ValueError(f"Formula mismatch: {actual.name}")
     check_values(frames["adn"].adn, calc.calculate_adn(ad.ad_line))
     rana, oscillator, rasi = calc.calculate_rasi(ad.advancing, ad.declining,
@@ -313,31 +318,36 @@ def run(args):
             export_series(stage, key, frame)
         export_combined(stage)
         validate(stage)
-        for key in FIELDS:
-            (ROOT / OUTPUT_DIR / key).mkdir(parents=True, exist_ok=True)
-        (ROOT / OUTPUT_DIR / "combined").mkdir(exist_ok=True)
-        # Prepare all files before publication. Keep backups for rollback on write failure.
-        targets = [OUTPUT_DIR / key / f"{key}.{ext}" for key in FIELDS for ext in ("parquet","csv","png")]
-        targets.extend(OUTPUT_DIR / "combined" / f"combined.{ext}" for ext in ("parquet", "csv"))
+        publish(stage)
+
+
+def publish(stage):
+    for key in FIELDS:
+        (ROOT / OUTPUT_DIR / key).mkdir(parents=True, exist_ok=True)
+    (ROOT / OUTPUT_DIR / "combined").mkdir(exist_ok=True)
+    # Prepare all files before publication. Keep backups for rollback on write failure.
+    targets = [OUTPUT_DIR / key / f"{key}.{ext}" for key in FIELDS for ext in ("parquet","csv","png")]
+    targets.extend(OUTPUT_DIR / "combined" / f"combined.{ext}" for ext in ("parquet", "csv"))
+    if (stage / "reference/splits.parquet").exists():
         targets.append(Path("reference/splits.parquet"))
-        backups = stage / "backups"
-        published_files = []
-        try:
-            for rel in targets:
-                backup = backups / rel
-                if (ROOT / rel).exists():
-                    backup.parent.mkdir(parents=True, exist_ok=True)
-                    backup.write_bytes((ROOT / rel).read_bytes())
-                (stage / rel).replace(ROOT / rel)
-                published_files.append(rel)
-        except OSError:
-            for rel in reversed(published_files):
-                backup = backups / rel
-                if backup.exists():
-                    backup.replace(ROOT / rel)
-                else:
-                    (ROOT / rel).unlink()
-            raise
+    backups = stage / "backups"
+    published_files = []
+    try:
+        for rel in targets:
+            backup = backups / rel
+            if (ROOT / rel).exists():
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                backup.write_bytes((ROOT / rel).read_bytes())
+            (stage / rel).replace(ROOT / rel)
+            published_files.append(rel)
+    except OSError:
+        for rel in reversed(published_files):
+            backup = backups / rel
+            if backup.exists():
+                backup.replace(ROOT / rel)
+            else:
+                (ROOT / rel).unlink()
+        raise
 
 
 def main():

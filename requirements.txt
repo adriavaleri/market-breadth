@@ -1,0 +1,9 @@
+pandas
+numpy
+pyarrow
+exchange-calendars
+boto3
+requests
+matplotlib
+Pillow
+tzdata
